@@ -78,7 +78,7 @@
         const stars = [];
         const numStars = canvas.height / 10;
         const n = canvas.height / 10;
-        const treeLevels = Math.ceil(Math.min(n / 10 + 10, 19));
+        const treeLevels = Math.ceil(Math.max(Math.min(10 * Math.log10(canvas.height) - 12, 21), 10));
         console.log('Stars: ', numStars);
         console.log('TreeLevel: ', treeLevels);
 
@@ -162,7 +162,7 @@
                     //ctx.strokeStyle = 'darkgreen';
                 }
                 
-                ctx.lineWidth = Math.log(d * d * d);
+                ctx.lineWidth = Math.log(d * d * d + 1);
             
                 if (d <= Math.random() * 2) return;
             
