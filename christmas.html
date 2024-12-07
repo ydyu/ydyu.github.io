@@ -34,6 +34,8 @@
         canvas.addEventListener('click', (event) => {
             mouseX = event.clientX;
             mouseY = event.clientY;
+            ctxTree.clearRect(0,0,canvasTree.width,canvasTree.height)
+            drawChristmasTree();
         });
 
         class Star {
@@ -174,7 +176,7 @@
                 ctx.stroke();
             
                 // Recursive calls for the branches
-                var variation = (Math.random() - 0.5) * Math.PI / 8 / d;
+                var variation = (Math.random() - 0.5) * Math.PI / 2 / d;
             
                 // Branch 1
                 tree(ctx, d - 1, s * 0.8, newX, newY, angle);
