@@ -236,6 +236,12 @@
         <!-- The panel floats above the dock -->
         <div id="panel-content" class="collapsed">
             <textarea id="env-input" rows="3" placeholder="Describe an environment (e.g., Toxic neon city ruins)..."></textarea>
+            <div style="display: flex; gap: 10px; margin: 10px 0;">
+                <label for="model-select" style="display: flex; align-items: center; color: rgba(255,255,255,0.7); font-size: 0.9rem; white-space: nowrap;">Model:</label>
+                <select id="model-select" style="flex: 1; padding: 8px; background: rgba(15, 15, 20, 0.8); color: white; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px; cursor: pointer;">
+                    <option value="">Loading models...</option>
+                </select>
+            </div>
             <button id="mutate-btn">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
                 Evolve AI Structure
@@ -270,7 +276,7 @@
     <canvas id="treeCanvas"></canvas>
 
     <!-- Load puter.js library before any AI-related scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/puter.js@latest/dist/puter.min.js"></script>
+    <script src="https://js.puter.com/v2/"></script>
 
     <script>
         // --- Vector Math ---
@@ -402,6 +408,42 @@
                 }
             }
 
+            async initializeAIModels() {
+                const modelSelect = document.getElementById('model-select');
+                const loreDisplay = document.getElementById('lore-display');
+                try {
+                    // Fetch available models from Puter v2 API
+                    const models = await puter.ai.listModels();
+                    
+                    // Clear existing options
+                    modelSelect.innerHTML = '';
+                    
+                    // Populate select with model options
+                    models.forEach(model => {
+                        const option = document.createElement('option');
+                        option.value = model.id || model.name;
+                        option.textContent = model.name || model.id;
+                        modelSelect.appendChild(option);
+                    });
+                    
+                    // Set default model based on priority:
+                    // 1. Check localStorage for 'treelabModel'
+                    let savedModel = localStorage.getItem('treelabModel');
+                    if (savedModel && models.some(m => (m.id || m.name) === savedModel)) {
+                        modelSelect.value = savedModel;
+                    } else if (models.length > 0) {
+                        // 2. Use first available model in the select options
+                        modelSelect.value = models[0].id || models[0].name;
+                        // Persist the default selection
+                        localStorage.setItem('treelabModel', modelSelect.value);
+                    }
+                } catch (e) {
+                    console.error('Failed to load AI models:', e);
+                    modelSelect.innerHTML = '<option value="">AI not ready</option>';
+                    loreDisplay.innerHTML = '<strong style="color: #ff9999;">AI not ready:</strong> please sign in to Puter and pick a model';
+                }
+            }
+
             setupGemini() {
                 const btn = document.getElementById('mutate-btn');
                 const input = document.getElementById('env-input');
@@ -412,6 +454,10 @@
                 const btnToggle = document.getElementById('btn-toggle');
                 const btnReset = document.getElementById('btn-reset');
                 const btnIterativeMutate = document.getElementById('btn-iterative-mutate');
+                const modelSelect = document.getElementById('model-select');
+
+                // Initialize AI models on page load
+                this.initializeAIModels();
 
                 // Panel toggle logic
                 btnToggle.addEventListener('click', () => {
@@ -497,6 +543,11 @@
                 // Standard evolve button
                 btn.addEventListener('click', () => triggerEvolution(false));
                 
+                // Model selection change: persist to localStorage
+                modelSelect.addEventListener('change', () => {
+                    localStorage.setItem('treelabModel', modelSelect.value);
+                });
+                
                 input.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
@@ -518,25 +569,38 @@
             }
 
             async callAIWithPuter(promptText, isMutation) {
-                // Use puter.js API for all AI requests
-                // Assumes puter.js is loaded and window.puter is available
+                // Use Puter v2 API with puter.ai.chat()
                 let promptString = "";
                 if (isMutation) {
                     promptString = `You are an expert alien botanist studying rapid chaotic evolution. \nThe CURRENT environment is: "${promptText}".\n\n1. MUTATE this environment. Introduce a catastrophic event, a surprising twist, or an extreme shift to the biome while keeping remnants of the original idea. Provide this updated, mutated description as 'newEnvironment'.\n2. Describe the new dominant lifeforms, their adaptations, and the new ecosystem dynamics. Provide this as 'lore'.`;
                 } else {
                     promptString = promptText;
                 }
-                // Select vendor and model as needed (example: Gemini, OpenAI, etc.)
-                const vendor = 'gemini'; // or 'openai', etc.
-                const model = 'gemini-2.5-flash-preview-09-2025'; // adjust as needed
+                
+                // Get selected model from dropdown
+                const modelSelect = document.getElementById('model-select');
+                let selectedModel = modelSelect.value;
+                
+                // Fallback logic:
+                // 1. Use modelSelect.value if set
+                // 2. Else use localStorage('treelabModel') if present
+                // 3. Else use first option from select if available
+                if (!selectedModel) {
+                    selectedModel = localStorage.getItem('treelabModel');
+                }
+                if (!selectedModel && modelSelect.options.length > 0) {
+                    selectedModel = modelSelect.options[0].value;
+                }
+                
                 try {
-                    const response = await window.puter.ai.send({
-                        vendor,
-                        model,
-                        prompt: promptString,
-                        stream: false
-                    });
-                    let text = response.text || response.choices?.[0]?.text || response.choices?.[0]?.message?.content || "";
+                    const response = await puter.ai.chat(promptString, { model: selectedModel });
+                    
+                    // Handle response: could be plain text or object with .text property
+                    let text = response.text || response || "";
+                    if (typeof text !== 'string') {
+                        text = JSON.stringify(text);
+                    }
+                    
                     let result = {};
                     if (isMutation) {
                         try {
@@ -550,95 +614,6 @@
                     return result;
                 } catch (e) {
                     throw e;
-                }
-            }
-            // async callGeminiAPI(promptText, isMutation) {
-                // const apiKey = ""; 
-// const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-                
-                let promptString = "";
-                
-                if (isMutation) {
-                    promptString = `You are an expert alien botanist studying rapid chaotic evolution. 
-                    The CURRENT environment is: "${promptText}".
-                    
-                    1. MUTATE this environment. Introduce a catastrophic event, a surprising twist, or an extreme shift to the biome while keeping remnants of the original idea. Provide this updated, mutated description as 'newEnvironment'.
-                    2. EVOLVE a sci-fi plant species adapted to this newly mutated environment.
-                    3. Provide speciesName, a short lore description (max 2 sentences), and color parameters using valid rgba CSS strings.
-                    4. Design its 2D growth structure by defining geometric target clusters (where the foliage/energy gathers). 
-                       The plant will grow a trunk from the bottom-center (x: 0.5, y: 1.0) upwards.
-                       Use relative coordinates from 0.0 to 1.0. 
-                       Shapes can be 'ellipse', 'ring', or 'rectangle'.
-                       Generate 1 to 4 structures that physically fit the mutated theme. Total particleCount must sum to roughly 400.`;
-                } else {
-                    promptString = `You are an expert alien botanist. The user has described an environment: "${promptText}".
-                    1. Create a sci-fi plant species adapted to this environment. Set 'newEnvironment' to exactly what the user provided.
-                    2. Provide speciesName, a short lore description (max 2 sentences), and color parameters using valid rgba CSS strings.
-                    3. Design its 2D growth structure by defining geometric target clusters (where the foliage/energy gathers). 
-                       The plant will grow a trunk from the bottom-center (x: 0.5, y: 1.0) upwards.
-                       Use relative coordinates from 0.0 to 1.0. 
-                       Shapes can be 'ellipse', 'ring', or 'rectangle'.
-                       Generate 1 to 4 structures that physically fit the theme. Total particleCount must sum to roughly 400.`;
-                }
-
-                const payload = {
-                    contents: [{ parts: [{ text: promptString }] }],
-                    generationConfig: {
-                        responseMimeType: "application/json",
-                        responseSchema: {
-                            type: "OBJECT",
-                            properties: {
-                                newEnvironment: { type: "STRING", description: "The mutated environment description (or the original if not mutating)." },
-                                speciesName: { type: "STRING" },
-                                lore: { type: "STRING" },
-                                branchColor: { type: "STRING", description: "rgba format for woody part" },
-                                glowColor: { type: "STRING", description: "rgba format for aura" },
-                                leafFill: { type: "STRING", description: "rgba format for leaf inner" },
-                                leafStroke: { type: "STRING", description: "rgba format for leaf outline" },
-                                structures: {
-                                    type: "ARRAY",
-                                    description: "Geometric shapes representing foliage/canopy layouts.",
-                                    items: {
-                                        type: "OBJECT",
-                                        properties: {
-                                            shapeType: { type: "STRING", description: "'ellipse', 'ring', or 'rectangle'" },
-                                            centerX: { type: "NUMBER", description: "0.0 (left) to 1.0 (right)" },
-                                            centerY: { type: "NUMBER", description: "0.0 (top) to 1.0 (bottom)" },
-                                            width: { type: "NUMBER", description: "0.0 to 1.0" },
-                                            height: { type: "NUMBER", description: "0.0 to 1.0" },
-                                            particleCount: { type: "INTEGER", description: "Number of attractor points in this shape (usually 50 to 300)" }
-                                        },
-                                        required: ["shapeType", "centerX", "centerY", "width", "height", "particleCount"]
-                                    }
-                                }
-                            },
-                            required: ["newEnvironment", "speciesName", "lore", "branchColor", "glowColor", "leafFill", "leafStroke", "structures"]
-                        }
-                    }
-                };
-
-                let retries = 5;
-                let delay = 1000;
-                
-                while (retries > 0) {
-                    try {
-                        // const response = await fetch(url, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify(payload)
-                        });
-                        
-                        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                        
-                        const result = await response.json();
-                        const text = result.candidates[0].content.parts[0].text;
-                        return JSON.parse(text);
-                    } catch (error) {
-                        retries--;
-                        if (retries === 0) throw error;
-                        await new Promise(r => setTimeout(r, delay));
-                        delay *= 2;
-                    }
                 }
             }
 
