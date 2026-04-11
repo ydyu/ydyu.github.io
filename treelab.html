@@ -500,15 +500,22 @@
                             input.value = newTheme.newEnvironment;
                         }
                         
-                        this.theme = {
-                            branchColor: newTheme.branchColor,
-                            glowColor: newTheme.glowColor,
-                            leafFill: newTheme.leafFill,
-                            leafStroke: newTheme.leafStroke
+                        const safeTheme = {
+                            branchColor: newTheme.branchColor || this.theme.branchColor,
+                            glowColor: newTheme.glowColor || this.theme.glowColor,
+                            leafFill: newTheme.leafFill || this.theme.leafFill,
+                            leafStroke: newTheme.leafStroke || this.theme.leafStroke
                         };
+                        this.theme = safeTheme;
                         
-                        loreDisplay.style.borderColor = newTheme.glowColor.replace(/[\d\.]+\)$/g, '0.7)');
-                        loreDisplay.innerHTML = `<strong>${newTheme.speciesName}</strong>${newTheme.lore}`;
+                        const borderGlow = (typeof safeTheme.glowColor === 'string' && safeTheme.glowColor)
+                            ? safeTheme.glowColor
+                            : "rgba(255, 255, 255, 0.7)";
+                        loreDisplay.style.borderColor = borderGlow.replace(/[\d\.]+\)$/g, '0.7)');
+                        
+                        const speciesName = (newTheme.speciesName || 'Unknown Species');
+                        const lore = (newTheme.lore || '');
+                        loreDisplay.innerHTML = `<strong>${speciesName}</strong>${lore}`;
                         
                         this.resetTree();
                         if (newTheme.structures && newTheme.structures.length > 0) {
@@ -569,52 +576,79 @@
             }
 
             async callAIWithPuter(promptText, isMutation) {
-                // Use Puter v2 API with puter.ai.chat()
+                const modelSelect = document.getElementById('model-select');
+                let selectedModel = modelSelect?.value;
+
+                if (!selectedModel) selectedModel = localStorage.getItem('treelabModel');
+                if (!selectedModel && modelSelect?.options?.length > 0) selectedModel = modelSelect.options[0].value;
+                if (!selectedModel) {
+                    throw new Error('AI not ready: please sign in to Puter and pick a model');
+                }
+
+                const jsonSchema = `\n\nReturn ONLY valid JSON (no markdown, no extra text) with this exact shape:\n{\n  "newEnvironment": string,\n  "speciesName": string,\n  "lore": string,\n  "branchColor": "rgba(r,g,b,a)",\n  "glowColor": "rgba(r,g,b,a)",\n  "leafFill": "rgba(r,g,b,a)",\n  "leafStroke": "rgba(r,g,b,a)",\n  "structures": [\n    {"shapeType":"ellipse|ring|rectangle","centerX":0-1,"centerY":0-1,"width":0-1,"height":0-1,"particleCount":integer}\n  ]\n}`;
+
                 let promptString = "";
                 if (isMutation) {
-                    promptString = `You are an expert alien botanist studying rapid chaotic evolution. \nThe CURRENT environment is: "${promptText}".\n\n1. MUTATE this environment. Introduce a catastrophic event, a surprising twist, or an extreme shift to the biome while keeping remnants of the original idea. Provide this updated, mutated description as 'newEnvironment'.\n2. Describe the new dominant lifeforms, their adaptations, and the new ecosystem dynamics. Provide this as 'lore'.`;
+                    promptString = `You are an expert alien botanist studying rapid chaotic evolution.
+The CURRENT environment is: "${promptText}".
+
+1) MUTATE this environment. Introduce a catastrophic event, a surprising twist, or an extreme shift to the biome while keeping remnants of the original idea. Provide this updated, mutated description as "newEnvironment".
+2) EVOLVE a sci-fi plant species adapted to this newly mutated environment.
+3) Provide "speciesName", a short lore description (max 2 sentences) as "lore", and color parameters using valid rgba CSS strings.
+4) Design its 2D growth structure by defining geometric target clusters (where the foliage/energy gathers).
+   - The plant will grow a trunk from bottom-center (x: 0.5, y: 1.0) upwards.
+   - Use relative coordinates from 0.0 to 1.0.
+   - shapeType can be "ellipse", "ring", or "rectangle".
+   - Generate 1 to 4 structures that physically fit the mutated theme.
+   - Total particleCount should sum to roughly 400.${jsonSchema}`;
                 } else {
-                    promptString = promptText;
+                    promptString = `You are an expert alien botanist. The user has described an environment: "${promptText}".
+1) Create a sci-fi plant species adapted to this environment. Set "newEnvironment" to exactly what the user provided.
+2) Provide "speciesName", a short lore description (max 2 sentences) as "lore", and color parameters using valid rgba CSS strings.
+3) Design its 2D growth structure by defining geometric target clusters (where the foliage/energy gathers).
+   - The plant will grow a trunk from bottom-center (x: 0.5, y: 1.0) upwards.
+   - Use relative coordinates from 0.0 to 1.0.
+   - shapeType can be "ellipse", "ring", or "rectangle".
+   - Generate 1 to 4 structures that physically fit the theme.
+   - Total particleCount should sum to roughly 400.${jsonSchema}`;
                 }
-                
-                // Get selected model from dropdown
-                const modelSelect = document.getElementById('model-select');
-                let selectedModel = modelSelect.value;
-                
-                // Fallback logic:
-                // 1. Use modelSelect.value if set
-                // 2. Else use localStorage('treelabModel') if present
-                // 3. Else use first option from select if available
-                if (!selectedModel) {
-                    selectedModel = localStorage.getItem('treelabModel');
-                }
-                if (!selectedModel && modelSelect.options.length > 0) {
-                    selectedModel = modelSelect.options[0].value;
-                }
-                
+
+                const extractJsonObject = (s) => {
+                    if (typeof s !== 'string') return '';
+                    const first = s.indexOf('{');
+                    const last = s.lastIndexOf('}');
+                    if (first === -1 || last === -1 || last <= first) return '';
+                    return s.slice(first, last + 1);
+                };
+
+                const response = await puter.ai.chat(promptString, { model: selectedModel });
+                let text = response?.text ?? response;
+                if (typeof text !== 'string') text = JSON.stringify(text);
+
+                const jsonText = extractJsonObject(text) || text;
+                let parsed;
                 try {
-                    const response = await puter.ai.chat(promptString, { model: selectedModel });
-                    
-                    // Handle response: could be plain text or object with .text property
-                    let text = response.text || response || "";
-                    if (typeof text !== 'string') {
-                        text = JSON.stringify(text);
-                    }
-                    
-                    let result = {};
-                    if (isMutation) {
-                        try {
-                            result = JSON.parse(text);
-                        } catch {
-                            result = { newEnvironment: text, lore: text };
-                        }
-                    } else {
-                        result = { lore: text };
-                    }
-                    return result;
+                    parsed = JSON.parse(jsonText);
                 } catch (e) {
-                    throw e;
+                    throw new Error('AI returned non-JSON output. Try a different model.');
                 }
+
+                const result = {
+                    newEnvironment: parsed.newEnvironment ?? promptText,
+                    speciesName: parsed.speciesName ?? 'Unknown Species',
+                    lore: parsed.lore ?? '',
+                    branchColor: parsed.branchColor ?? this.theme.branchColor,
+                    glowColor: parsed.glowColor ?? this.theme.glowColor,
+                    leafFill: parsed.leafFill ?? this.theme.leafFill,
+                    leafStroke: parsed.leafStroke ?? this.theme.leafStroke,
+                    structures: Array.isArray(parsed.structures) ? parsed.structures : []
+                };
+
+                if (!Array.isArray(result.structures) || result.structures.length === 0) {
+                    throw new Error('AI response missing structures. Try a different model.');
+                }
+
+                return result;
             }
 
             setupEventListeners() {
