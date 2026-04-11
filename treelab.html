@@ -269,6 +269,9 @@
 
     <canvas id="treeCanvas"></canvas>
 
+    <!-- Load puter.js library before any AI-related scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/puter.js@latest/dist/puter.min.js"></script>
+
     <script>
         // --- Vector Math ---
         class Vector {
@@ -444,7 +447,7 @@
                     }
 
                     try {
-                        const newTheme = await this.callGeminiAPI(prompt, isMutation);
+                        const newTheme = await this.callAIWithPuter(prompt, isMutation);
                         
                         // If it was a mutation, the AI invented a NEW environment. Update the text box!
                         if (isMutation && newTheme.newEnvironment) {
@@ -514,9 +517,44 @@
                 });
             }
 
-            async callGeminiAPI(promptText, isMutation) {
-                const apiKey = ""; 
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            async callAIWithPuter(promptText, isMutation) {
+                // Use puter.js API for all AI requests
+                // Assumes puter.js is loaded and window.puter is available
+                let promptString = "";
+                if (isMutation) {
+                    promptString = `You are an expert alien botanist studying rapid chaotic evolution. \nThe CURRENT environment is: "${promptText}".\n\n1. MUTATE this environment. Introduce a catastrophic event, a surprising twist, or an extreme shift to the biome while keeping remnants of the original idea. Provide this updated, mutated description as 'newEnvironment'.\n2. Describe the new dominant lifeforms, their adaptations, and the new ecosystem dynamics. Provide this as 'lore'.`;
+                } else {
+                    promptString = promptText;
+                }
+                // Select vendor and model as needed (example: Gemini, OpenAI, etc.)
+                const vendor = 'gemini'; // or 'openai', etc.
+                const model = 'gemini-2.5-flash-preview-09-2025'; // adjust as needed
+                try {
+                    const response = await window.puter.ai.send({
+                        vendor,
+                        model,
+                        prompt: promptString,
+                        stream: false
+                    });
+                    let text = response.text || response.choices?.[0]?.text || response.choices?.[0]?.message?.content || "";
+                    let result = {};
+                    if (isMutation) {
+                        try {
+                            result = JSON.parse(text);
+                        } catch {
+                            result = { newEnvironment: text, lore: text };
+                        }
+                    } else {
+                        result = { lore: text };
+                    }
+                    return result;
+                } catch (e) {
+                    throw e;
+                }
+            }
+            // async callGeminiAPI(promptText, isMutation) {
+                // const apiKey = ""; 
+// const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
                 
                 let promptString = "";
                 
@@ -584,7 +622,7 @@
                 
                 while (retries > 0) {
                     try {
-                        const response = await fetch(url, {
+                        // const response = await fetch(url, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify(payload)
